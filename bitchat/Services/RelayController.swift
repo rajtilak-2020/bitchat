@@ -11,8 +11,10 @@ struct RelayDecision {
 struct RelayController {
     static func decide(ttl: UInt8,
                        senderIsSelf: Bool,
+                       recipientIsSelf: Bool = false,
                        isEncrypted: Bool,
                        isDirectedEncrypted: Bool,
+                       isFragment: Bool,
                        isDirectedFragment: Bool,
                        isHandshake: Bool,
                        isAnnounce: Bool,
@@ -21,7 +23,7 @@ struct RelayController {
         let ttlCap = min(ttl, TransportConfig.messageTTLDefault)
 
         // Suppress obvious non-relays
-        if ttlCap <= 1 || senderIsSelf {
+        if ttlCap <= 1 || senderIsSelf || recipientIsSelf {
             return RelayDecision(shouldRelay: false, newTTL: ttlCap, delayMs: 0)
         }
 
@@ -36,12 +38,32 @@ struct RelayController {
             return RelayDecision(shouldRelay: true, newTTL: newTTL, delayMs: delayMs)
         }
 
+        if isFragment {
+            // Dense graphs clamp harder to contain full-fanout fragment floods;
+            // sparse graphs get full depth so media reaches as far as text.
+            let fragmentCap = degree >= highDegreeThreshold
+                ? TransportConfig.bleFragmentRelayTtlCapDense
+                : TransportConfig.bleFragmentRelayTtlCap
+            let ttlLimit = min(ttlCap, fragmentCap)
+            guard ttlLimit > 1 else {
+                return RelayDecision(shouldRelay: false, newTTL: ttlLimit, delayMs: 0)
+            }
+            let newTTL = ttlLimit &- 1
+            let delayMs = Int.random(in: TransportConfig.bleFragmentRelayMinDelayMs...TransportConfig.bleFragmentRelayMaxDelayMs)
+            return RelayDecision(shouldRelay: true, newTTL: newTTL, delayMs: delayMs)
+        }
+
         // TTL clamping for broadcast
         // - Dense graphs: keep lower but still allow multi-hop bridging
+        // - Thin chains (degree <= 2): every hop counts and flood cost is
+        //   minimal, so relay at full incoming depth
         // - Announces get a bit more headroom
         let ttlLimit: UInt8 = {
             if degree >= highDegreeThreshold {
                 return max(UInt8(2), min(ttlCap, UInt8(5)))
+            }
+            if degree <= 2 {
+                return ttlCap
             }
             let preferred = UInt8(isAnnounce ? 7 : 6)
             return max(UInt8(2), min(ttlCap, preferred))

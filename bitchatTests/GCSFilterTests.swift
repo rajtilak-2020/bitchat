@@ -1,22 +1,51 @@
-import XCTest
+import Testing
+import struct Foundation.Data
 @testable import bitchat
 
-final class GCSFilterTests: XCTestCase {
-    func testBuildFilterWithDuplicateIdsProducesStableEncoding() {
+struct GCSFilterTests {
+    @Test func buildFilterWithDuplicateIdsProducesStableEncoding() {
         let id = Data(repeating: 0xAB, count: 16)
         let ids = Array(repeating: id, count: 64)
 
         let params = GCSFilter.buildFilter(ids: ids, maxBytes: 128, targetFpr: 0.01)
-        XCTAssertGreaterThanOrEqual(params.m, 1)
+        #expect(params.m >= 1)
 
         let decoded = GCSFilter.decodeToSortedSet(p: params.p, m: params.m, data: params.data)
-        XCTAssertLessThanOrEqual(decoded.count, 1)
+        #expect(decoded.count <= 1)
     }
 
-    func testBucketAvoidsZeroCandidate() {
+    @Test func bucketAvoidsZeroCandidate() {
         let id = Data(repeating: 0x01, count: 16)
         let bucket = GCSFilter.bucket(for: id, modulus: 2)
-        XCTAssertNotEqual(bucket, 0)
-        XCTAssertLessThan(bucket, 2)
+        #expect(bucket != 0)
+        #expect(bucket < 2)
+    }
+
+    @Test func decodeRejectsOutOfRangeParameters() {
+        let junk = Data(repeating: 0xFF, count: 64)
+        #expect(GCSFilter.decodeToSortedSet(p: 0, m: 1000, data: junk).isEmpty)
+        #expect(GCSFilter.decodeToSortedSet(p: -1, m: 1000, data: junk).isEmpty)
+        #expect(GCSFilter.decodeToSortedSet(p: GCSFilter.maxP + 1, m: 1000, data: junk).isEmpty)
+        #expect(GCSFilter.decodeToSortedSet(p: 255, m: UInt32.max, data: junk).isEmpty)
+        #expect(GCSFilter.decodeToSortedSet(p: 8, m: 0, data: junk).isEmpty)
+        #expect(GCSFilter.decodeToSortedSet(p: 8, m: 1, data: junk).isEmpty)
+    }
+
+    @Test func decodeOfTruncatedDataReturnsOnlyCompleteValues() {
+        let ids = (0..<32).map { i in Data(repeating: UInt8(i), count: 16) }
+        let params = GCSFilter.buildFilter(ids: ids, maxBytes: 128, targetFpr: 0.01)
+        let full = GCSFilter.decodeToSortedSet(p: params.p, m: params.m, data: params.data)
+        let truncated = GCSFilter.decodeToSortedSet(p: params.p, m: params.m, data: params.data.prefix(params.data.count / 2))
+        #expect(truncated.count <= full.count)
+        // Truncation must not invent values that were not in the full set.
+        #expect(truncated.allSatisfy { full.contains($0) })
+    }
+
+    @Test func requestSyncPacketDecodeRejectsOversizedP() {
+        let valid = RequestSyncPacket(p: 8, m: 4096, data: Data([0x01, 0x02]))
+        #expect(RequestSyncPacket.decode(from: valid.encode()) != nil)
+
+        let oversized = RequestSyncPacket(p: 200, m: 4096, data: Data([0x01, 0x02]))
+        #expect(RequestSyncPacket.decode(from: oversized.encode()) == nil)
     }
 }

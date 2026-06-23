@@ -9,23 +9,22 @@
 import Testing
 import CryptoKit
 import struct Foundation.UUID
+@testable import BitFoundation // to avoid unnecessary public's
 @testable import bitchat
 
-// TODO: Remove once MockBLEService is refactored to fix race condition
-@Suite(.serialized)
 struct PrivateChatE2ETests {
     
     private let alice: MockBLEService
     private let bob: MockBLEService
     private let charlie: MockBLEService
-    private let mockKeychain: MockKeychain
+    private let mockKeychain = MockKeychain()
+    private let bus = MockBLEBus()
     
     init() {
         // Create services with unique peer IDs to avoid any collision
-        alice = MockBLEService(peerID: PeerID(str: UUID().uuidString), nickname: TestConstants.testNickname1)
-        bob = MockBLEService(peerID: PeerID(str: UUID().uuidString), nickname: TestConstants.testNickname2)
-        charlie = MockBLEService(peerID: PeerID(str: UUID().uuidString), nickname: TestConstants.testNickname3)
-        mockKeychain = MockKeychain()
+        alice = MockBLEService(peerID: PeerID(str: UUID().uuidString), nickname: TestConstants.testNickname1, bus: bus)
+        bob = MockBLEService(peerID: PeerID(str: UUID().uuidString), nickname: TestConstants.testNickname2, bus: bus)
+        charlie = MockBLEService(peerID: PeerID(str: UUID().uuidString), nickname: TestConstants.testNickname3, bus: bus)
     }
     
     // MARK: - Basic Private Messaging Tests
@@ -53,7 +52,7 @@ struct PrivateChatE2ETests {
             )
 
             // Wait a bit to ensure message would have been delivered if it was going to be
-            try? await Task.sleep(nanoseconds: UInt64(TestConstants.shortTimeout * 1_000_000_000))
+            try? await sleep(0.1)
         }
 
         #expect(!bobReceivedMessage, "Bob should not have received the message")
@@ -171,7 +170,7 @@ struct PrivateChatE2ETests {
             // Send encrypted private message
             alice.sendPrivateMessage(
                 TestConstants.testMessage1,
-                to: TestConstants.testPeerID2,
+                to: bob.peerID,
                 recipientNickname: TestConstants.testNickname2
             )
         }
@@ -188,11 +187,11 @@ struct PrivateChatE2ETests {
             // Bob relays private messages for Charlie
             bob.packetDeliveryHandler = { packet in
                 if let recipientID = packet.recipientID,
-                   String(data: recipientID, encoding: .utf8) == charlie.peerID {
+                   PeerID(data: recipientID) == charlie.peerID {
                     // Relay to Charlie
                     var relayPacket = packet
                     relayPacket.ttl = packet.ttl - 1
-                    self.charlie.simulateIncomingPacket(relayPacket)
+                    charlie.simulateIncomingPacket(relayPacket)
                 }
             }
             
@@ -235,7 +234,7 @@ struct PrivateChatE2ETests {
             for i in 0..<messageCount {
                 alice.sendPrivateMessage(
                     "Private message \(i)",
-                    to: TestConstants.testPeerID2,
+                    to: bob.peerID,
                     recipientNickname: TestConstants.testNickname2
                 )
             }
@@ -254,7 +253,7 @@ struct PrivateChatE2ETests {
 
             alice.sendPrivateMessage(
                 TestConstants.testLongMessage,
-                to: TestConstants.testPeerID2,
+                to: bob.peerID,
                 recipientNickname: TestConstants.testNickname2
             )
         }

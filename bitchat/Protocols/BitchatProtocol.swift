@@ -60,38 +60,7 @@
 
 import Foundation
 import CoreBluetooth
-
-// MARK: - Message Types
-
-/// Simplified BitChat protocol message types.
-/// Reduced from 24 types to just 6 essential ones.
-/// All private communication metadata (receipts, status) is embedded in noiseEncrypted payloads.
-enum MessageType: UInt8 {
-    // Public messages (unencrypted)
-    case announce = 0x01        // "I'm here" with nickname
-    case message = 0x02         // Public chat message  
-    case leave = 0x03           // "I'm leaving"
-    case requestSync = 0x21     // GCS filter-based sync request (local-only)
-    
-    // Noise encryption
-    case noiseHandshake = 0x10  // Handshake (init or response determined by payload)
-    case noiseEncrypted = 0x11  // All encrypted payloads (messages, receipts, etc.)
-    
-    // Fragmentation (simplified)
-    case fragment = 0x20        // Single fragment type for large messages
-    
-    var description: String {
-        switch self {
-        case .announce: return "announce"
-        case .message: return "message"
-        case .leave: return "leave"
-        case .requestSync: return "requestSync"
-        case .noiseHandshake: return "noiseHandshake"
-        case .noiseEncrypted: return "noiseEncrypted"
-        case .fragment: return "fragment"
-        }
-    }
-}
+import BitFoundation
 
 // MARK: - Noise Payload Types
 
@@ -129,35 +98,6 @@ enum LazyHandshakeState {
     case failed(Error)         // Handshake failed
 }
 
-// MARK: - Delivery Status
-
-// Delivery status for messages
-enum DeliveryStatus: Codable, Equatable, Hashable {
-    case sending
-    case sent  // Left our device
-    case delivered(to: String, at: Date)  // Confirmed by recipient
-    case read(by: String, at: Date)  // Seen by recipient
-    case failed(reason: String)
-    case partiallyDelivered(reached: Int, total: Int)  // For rooms
-    
-    var displayText: String {
-        switch self {
-        case .sending:
-            return "Sending..."
-        case .sent:
-            return "Sent"
-        case .delivered(let nickname, _):
-            return "Delivered to \(nickname)"
-        case .read(let nickname, _):
-            return "Read by \(nickname)"
-        case .failed(let reason):
-            return "Failed: \(reason)"
-        case .partiallyDelivered(let reached, let total):
-            return "Delivered to \(reached)/\(total)"
-        }
-    }
-}
-
 // MARK: - Delegate Protocol
 
 protocol BitchatDelegate: AnyObject {
@@ -176,7 +116,7 @@ protocol BitchatDelegate: AnyObject {
 
     // Bluetooth state updates for user notifications
     func didUpdateBluetoothState(_ state: CBManagerState)
-    func didReceivePublicMessage(from peerID: PeerID, nickname: String, content: String, timestamp: Date)
+    func didReceivePublicMessage(from peerID: PeerID, nickname: String, content: String, timestamp: Date, messageID: String?)
 }
 
 // Provide default implementation to make it effectively optional
@@ -193,7 +133,7 @@ extension BitchatDelegate {
         // Default empty implementation
     }
 
-    func didReceivePublicMessage(from peerID: PeerID, nickname: String, content: String, timestamp: Date) {
+    func didReceivePublicMessage(from peerID: PeerID, nickname: String, content: String, timestamp: Date, messageID: String?) {
         // Default empty implementation
     }
 }

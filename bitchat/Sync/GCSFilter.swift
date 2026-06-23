@@ -12,6 +12,11 @@ import CryptoKit
 enum GCSFilter {
     struct Params { let p: Int; let m: UInt32; let data: Data }
 
+    // Highest Golomb-Rice parameter we accept from the wire. P maps to an FPR
+    // of ~1/2^P; beyond 32 the remainder width exceeds any practical filter
+    // and shifts in decode would silently overflow to garbage values.
+    static let maxP = 32
+
     // Derive P from FPR (~ 1 / 2^P)
     static func deriveP(targetFpr: Double) -> Int {
         let f = max(0.000001, min(0.25, targetFpr))
@@ -66,6 +71,9 @@ enum GCSFilter {
     }
 
     static func decodeToSortedSet(p: Int, m: UInt32, data: Data) -> [UInt64] {
+        // Reject out-of-range parameters rather than decoding garbage: callers
+        // treat the result as "peer has nothing" and fall back to sending data.
+        guard p >= 1, p <= maxP, m > 1 else { return [] }
         var values: [UInt64] = []
         let reader = BitReader(data)
         var acc: UInt64 = 0

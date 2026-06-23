@@ -1,4 +1,5 @@
 import BitLogger
+import BitFoundation
 import Foundation
 import Combine
 
@@ -26,16 +27,31 @@ final class FavoritesPersistenceService: ObservableObject {
 
     private static let storageKey = "chat.bitchat.favorites"
     private static let keychainService = "chat.bitchat.favorites"
+    private let keychain: KeychainManagerProtocol
     
     @Published private(set) var favorites: [Data: FavoriteRelationship] = [:] // Noise pubkey -> relationship
     @Published private(set) var mutualFavorites: Set<Data> = []
     
-    private let userDefaults = UserDefaults.standard
-    private var cancellables = Set<AnyCancellable>()
-    
     static let shared = FavoritesPersistenceService()
-    
-    private init() {
+
+    /// Default keychain for the `shared` singleton. Under test this is an
+    /// in-memory keychain so touching `shared` never blocks on securityd
+    /// (`SecItemCopyMatching` can hang in test environments) and never reads
+    /// or writes the developer's real keychain. Production behavior is
+    /// unchanged. Tests that need their own instance keep injecting a mock
+    /// via `init(keychain:)`.
+    private nonisolated static func makeDefaultKeychain() -> KeychainManagerProtocol {
+        // PreviewKeychainManager lives in _PreviewHelpers, a development
+        // asset excluded from archive builds — release code must not
+        // reference it. Tests always run Debug, so the guard is lossless.
+        #if DEBUG
+        if TestEnvironment.isRunningTests { return PreviewKeychainManager() }
+        #endif
+        return KeychainManager()
+    }
+
+    init(keychain: KeychainManagerProtocol = FavoritesPersistenceService.makeDefaultKeychain()) {
+        self.keychain = keychain
         loadFavorites()
         
         // Update mutual favorites when favorites change
@@ -196,7 +212,7 @@ final class FavoritesPersistenceService: ObservableObject {
         saveFavorites()
         
         // Delete from keychain directly
-        KeychainHelper.delete(
+        keychain.delete(
             key: Self.storageKey,
             service: Self.keychainService
         )
@@ -216,10 +232,11 @@ final class FavoritesPersistenceService: ObservableObject {
             let data = try encoder.encode(relationships)
             
             // Store in keychain for security
-            KeychainHelper.save(
+            keychain.save(
                 key: Self.storageKey,
                 data: data,
-                service: Self.keychainService
+                service: Self.keychainService,
+                accessible: nil
             )
             
             // Successfully saved favorites
@@ -231,7 +248,7 @@ final class FavoritesPersistenceService: ObservableObject {
     private func loadFavorites() {
         // Loading favorites from keychain
         
-        guard let data = KeychainHelper.load(
+        guard let data = keychain.load(
             key: Self.storageKey,
             service: Self.keychainService
         ) else { 

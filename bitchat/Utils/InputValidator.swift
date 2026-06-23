@@ -1,4 +1,5 @@
 import Foundation
+import BitLogger
 
 /// Comprehensive input validation for BitChat protocol
 /// Prevents injection attacks, buffer overflows, and malformed data
@@ -16,29 +17,26 @@ struct InputValidator {
     // MARK: - String Content Validation
     
     /// Validates and sanitizes user-provided strings used in UI
+    ///
+    /// Rejects strings containing control characters to prevent potential security issues
+    /// and UI rendering problems. This strict approach ensures data integrity at input time.
     static func validateUserString(_ string: String, maxLength: Int) -> String? {
-        // Check empty
-        guard !string.isEmpty else { return nil }
+        guard let trimmed = string.trimmedOrNilIfEmpty, trimmed.count <= maxLength else { return nil }
 
-        // Trim whitespace
-        let trimmed = string.trimmingCharacters(in: .whitespacesAndNewlines)
-        guard !trimmed.isEmpty else { return nil }
-
-        // Check length
-        guard trimmed.count <= maxLength else { return nil }
-
-        // Remove control characters
+        // Reject control characters outright instead of rewriting the string.
+        // This prevents injection attacks and ensures consistent UI rendering.
         let controlChars = CharacterSet.controlCharacters
-        let cleaned = trimmed.components(separatedBy: controlChars).joined()
-        
-        // Ensure valid UTF-8 (should already be, but double-check)
-        guard cleaned.data(using: .utf8) != nil else { return nil }
-        
-        // Prevent zero-width characters and other invisible unicode
-        let invisibleChars = CharacterSet(charactersIn: "\u{200B}\u{200C}\u{200D}\u{FEFF}")
-        let visible = cleaned.components(separatedBy: invisibleChars).joined()
-        
-        return visible.isEmpty ? nil : visible
+        if !trimmed.unicodeScalars.allSatisfy({ !controlChars.contains($0) }) {
+            // Log rejection for monitoring, without exposing actual content for privacy
+            let controlCharCount = trimmed.unicodeScalars.filter { controlChars.contains($0) }.count
+            SecureLogger.debug(
+                "Input validation rejected string (length: \(trimmed.count), control chars: \(controlCharCount))",
+                category: .security
+            )
+            return nil
+        }
+
+        return trimmed
     }
     
     /// Validates nickname
@@ -52,11 +50,13 @@ struct InputValidator {
     // MessageType/NoisePayloadType enums; keeping validator free of stale lists.
 
     /// Validates timestamp is reasonable (not too far in past or future)
+    /// BCH-01-011: Reduced from ±1 hour to ±5 minutes to limit replay attack window
     static func validateTimestamp(_ timestamp: Date) -> Bool {
         let now = Date()
-        let oneHourAgo = now.addingTimeInterval(-3600)
-        let oneHourFromNow = now.addingTimeInterval(3600)
-        return timestamp >= oneHourAgo && timestamp <= oneHourFromNow
+        // 5 minutes = 300 seconds (industry standard for replay protection)
+        let fiveMinutesAgo = now.addingTimeInterval(-300)
+        let fiveMinutesFromNow = now.addingTimeInterval(300)
+        return timestamp >= fiveMinutesAgo && timestamp <= fiveMinutesFromNow
     }
 
 }

@@ -11,14 +11,27 @@ import SwiftUI
 struct PaymentChipView: View {
     @Environment(\.colorScheme) private var colorScheme
     @Environment(\.openURL) private var openURL
+    @ThemedPalette private var palette
     
     enum PaymentType {
         case cashu(String)
         case lightning(String)
-        
+
+        private static let cashuAllowedCharacters = CharacterSet.alphanumerics.union(CharacterSet(charactersIn: "-_"))
+
+        private static func cashuURL(from link: String) -> URL? {
+            if let url = URL(string: link), url.scheme != nil {
+                return url
+            }
+            let enc = link.addingPercentEncoding(withAllowedCharacters: cashuAllowedCharacters) ?? link
+            return URL(string: "cashu:\(enc)")
+        }
+
         var url: URL? {
             switch self {
-            case .cashu(let link), .lightning(let link):
+            case .cashu(let link):
+                return Self.cashuURL(from: link)
+            case .lightning(let link):
                 return URL(string: link)
             }
         }
@@ -42,9 +55,7 @@ struct PaymentChipView: View {
     
     let paymentType: PaymentType
     
-    private var fgColor: Color {
-        colorScheme == .dark ? Color.green : Color(red: 0, green: 0.5, blue: 0)
-    }
+    private var fgColor: Color { palette.primary }
     private var bgColor: Color {
         colorScheme == .dark ? Color.gray.opacity(0.18) : Color.gray.opacity(0.12)
     }
@@ -61,7 +72,7 @@ struct PaymentChipView: View {
             HStack(spacing: 6) {
                 Text(paymentType.emoji)
                 Text(paymentType.label)
-                    .font(.bitchatSystem(size: 12, weight: .semibold, design: .monospaced))
+                    .bitchatFont(size: 12, weight: .semibold)
             }
             .padding(.vertical, 6)
             .padding(.horizontal, 12)

@@ -1,4 +1,5 @@
 import BitLogger
+import Combine
 import Foundation
 
 /// Dependencies for location notes, allowing tests to stub relay/identity behavior.
@@ -14,6 +15,10 @@ struct LocationNotesDependencies {
     var sendEvent: SendEvent
     var deriveIdentity: (_ geohash: String) throws -> NostrIdentity
     var now: () -> Date
+    // Fires when the geo relay directory refreshes; used to retry after "no relays".
+    var relayDirectoryUpdates: AnyPublisher<Void, Never> = Empty(completeImmediately: false).eraseToAnyPublisher()
+
+    private static let idBridge = NostrIdentityBridge()
 
     static let live = LocationNotesDependencies(
         relayLookup: { geohash, count in
@@ -35,9 +40,13 @@ struct LocationNotesDependencies {
             NostrRelayManager.shared.sendEvent(event, to: relays)
         },
         deriveIdentity: { geohash in
-            try NostrIdentityBridge.deriveIdentity(forGeohash: geohash)
+            try idBridge.deriveIdentity(forGeohash: geohash)
         },
-        now: { Date() }
+        now: { Date() },
+        relayDirectoryUpdates: NotificationCenter.default
+            .publisher(for: .geoRelayDirectoryDidRefresh)
+            .map { _ in () }
+            .eraseToAnyPublisher()
     )
 }
 
@@ -61,7 +70,7 @@ final class LocationNotesManager: ObservableObject {
 
         var displayName: String {
             let suffix = String(pubkey.suffix(4))
-            if let nick = nickname, !nick.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty {
+            if let nick = nickname?.trimmedOrNilIfEmpty {
                 return "\(nick)#\(suffix)"
             }
             return "anon#\(suffix)"
@@ -75,6 +84,7 @@ final class LocationNotesManager: ObservableObject {
     @Published private(set) var errorMessage: String?
     private var subscriptionID: String?
     private var noteIDs = Set<String>() // O(1) duplicate detection
+    private var directoryUpdateCancellable: AnyCancellable?
     private let dependencies: LocationNotesDependencies
     private let maxNotesInMemory = 500 // Defensive cap (relay limit is 200)
 
@@ -99,6 +109,15 @@ final class LocationNotesManager: ObservableObject {
             SecureLogger.warning("LocationNotesManager: invalid geohash '\(norm)' (expected 8 valid base32 chars)", category: .session)
         }
         subscribe()
+        // The relay directory may load after init (remote fetch over Tor);
+        // retry automatically instead of staying stuck on "no relays".
+        directoryUpdateCancellable = dependencies.relayDirectoryUpdates
+            .sink { [weak self] in
+                Task { @MainActor [weak self] in
+                    guard let self, self.state == .noRelays else { return }
+                    self.subscribe()
+                }
+            }
     }
 
     func setGeohash(_ newGeohash: String) {
@@ -161,14 +180,22 @@ final class LocationNotesManager: ObservableObject {
 
         subscriptionID = subID
         initialLoadComplete = false
-        // For persistent notes, allow relays to return recent history without an aggressive time cutoff
-        let filter = NostrFilter.geohashNotes(geohash, since: nil, limit: 200)
+
+        // Subscribe to center + 8 neighbors (± 1 grid)
+        let neighbors = Geohash.neighbors(of: geohash)
+        let allGeohashes = [geohash] + neighbors
+        let filter = NostrFilter.geohashNotes(allGeohashes, since: nil, limit: 200)
+
+        // Build a set of valid geohashes for tag matching (includes all 9 cells)
+        let validGeohashes = Set(allGeohashes.map { $0.lowercased() })
 
         dependencies.subscribe(filter, subID, relays, { [weak self] event in
             guard let self = self else { return }
             guard event.kind == NostrProtocol.EventKind.textNote.rawValue else { return }
-            // Ensure matching tag
-            guard event.tags.contains(where: { $0.count >= 2 && $0[0].lowercased() == "g" && $0[1].lowercased() == self.geohash }) else { return }
+            // Ensure matching tag - accept any of our 9 geohashes
+            guard event.tags.contains(where: { tag in
+                tag.count >= 2 && tag[0].lowercased() == "g" && validGeohashes.contains(tag[1].lowercased())
+            }) else { return }
             guard !self.noteIDs.contains(event.id) else { return }
             self.noteIDs.insert(event.id)
             let nick = event.tags.first(where: { $0.first?.lowercased() == "n" && $0.count >= 2 })?.dropFirst().first
@@ -189,8 +216,7 @@ final class LocationNotesManager: ObservableObject {
 
     /// Send a location note for the current geohash using the per-geohash identity.
     func send(content: String, nickname: String) {
-        let trimmed = content.trimmingCharacters(in: .whitespacesAndNewlines)
-        guard !trimmed.isEmpty else { return }
+        guard let trimmed = content.trimmedOrNilIfEmpty else { return }
         let relays = dependencies.relayLookup(geohash, TransportConfig.nostrGeoRelayCount)
         guard !relays.isEmpty else {
             state = .noRelays

@@ -2,24 +2,24 @@ import SwiftUI
 
 struct AppInfoView: View {
     @Environment(\.dismiss) var dismiss
-    @Environment(\.colorScheme) var colorScheme
-    
-    private var backgroundColor: Color {
-        colorScheme == .dark ? Color.black : Color.white
+    @ThemedPalette private var palette
+    @AppStorage(AppTheme.storageKey) private var appThemeRawValue = AppTheme.matrix.rawValue
+
+    private var selectedTheme: AppTheme {
+        AppTheme(rawValue: appThemeRawValue) ?? .matrix
     }
-    
-    private var textColor: Color {
-        colorScheme == .dark ? Color.green : Color(red: 0, green: 0.5, blue: 0)
-    }
-    
-    private var secondaryTextColor: Color {
-        colorScheme == .dark ? Color.green.opacity(0.8) : Color(red: 0, green: 0.5, blue: 0).opacity(0.8)
-    }
+
+    private var backgroundColor: Color { palette.background }
+
+    private var textColor: Color { palette.primary }
+
+    private var secondaryTextColor: Color { palette.secondary }
     
     // MARK: - Constants
     private enum Strings {
         static let appName: LocalizedStringKey = "app_info.app_name"
         static let tagline: LocalizedStringKey = "app_info.tagline"
+        static let appearanceTitle: LocalizedStringKey = "app_info.appearance.title"
 
         enum Features {
             static let title: LocalizedStringKey = "app_info.features.title"
@@ -86,10 +86,6 @@ struct AppInfoView: View {
             ]
         }
 
-        enum Warning {
-            static let title: LocalizedStringKey = "app_info.warning.title"
-            static let message: LocalizedStringKey = "app_info.warning.message"
-        }
     }
     
     var body: some View {
@@ -105,12 +101,12 @@ struct AppInfoView: View {
                 .foregroundColor(textColor)
                 .padding()
             }
-            .background(backgroundColor.opacity(0.95))
-            
+            .themedSurface(opacity: 0.95)
+
             ScrollView {
                 infoContent
             }
-            .background(backgroundColor)
+            .themedSheetBackground()
         }
         .frame(width: 600, height: 700)
         #else
@@ -118,13 +114,13 @@ struct AppInfoView: View {
             ScrollView {
                 infoContent
             }
-            .background(backgroundColor)
+            .themedSheetBackground()
             .navigationBarTitleDisplayMode(.inline)
             .toolbar {
                 ToolbarItem(placement: .navigationBarTrailing) {
                     Button(action: { dismiss() }) {
                         Image(systemName: "xmark")
-                            .font(.bitchatSystem(size: 13, weight: .semibold, design: .monospaced))
+                            .bitchatFont(size: 13, weight: .semibold)
                             .foregroundColor(textColor)
                             .frame(width: 32, height: 32)
                     }
@@ -142,16 +138,40 @@ struct AppInfoView: View {
             // Header
             VStack(alignment: .center, spacing: 8) {
                 Text(Strings.appName)
-                    .font(.bitchatSystem(size: 32, weight: .bold, design: .monospaced))
+                    .bitchatFont(size: 32, weight: .bold)
                     .foregroundColor(textColor)
                 
                 Text(Strings.tagline)
-                    .font(.bitchatSystem(size: 16, design: .monospaced))
+                    .bitchatFont(size: 16)
                     .foregroundColor(secondaryTextColor)
             }
             .frame(maxWidth: .infinity)
             .padding(.vertical)
-            
+
+            // Appearance — single row: label left, theme chips right
+            HStack(spacing: 12) {
+                SectionHeader(Strings.appearanceTitle)
+                Spacer()
+                ForEach(AppTheme.allCases) { theme in
+                    Button {
+                        appThemeRawValue = theme.rawValue
+                    } label: {
+                        Text(theme.displayNameKey)
+                            .bitchatFont(size: 13, weight: selectedTheme == theme ? .semibold : .regular)
+                            .foregroundColor(selectedTheme == theme ? palette.accent : secondaryTextColor)
+                            .padding(.horizontal, 10)
+                            .padding(.vertical, 6)
+                            .background(
+                                RoundedRectangle(cornerRadius: 8, style: .continuous)
+                                    .fill(selectedTheme == theme ? palette.accent.opacity(0.15) : Color.clear)
+                            )
+                            .contentShape(Rectangle())
+                    }
+                    .buttonStyle(.plain)
+                    .accessibilityAddTraits(selectedTheme == theme ? .isSelected : [])
+                }
+            }
+
             // How to Use
             VStack(alignment: .leading, spacing: 16) {
                 SectionHeader(Strings.HowToUse.title)
@@ -161,7 +181,7 @@ struct AppInfoView: View {
                         Text(instruction)
                     }
                 }
-                .font(.bitchatSystem(size: 14, design: .monospaced))
+                .bitchatFont(size: 14)
                 .foregroundColor(textColor)
             }
 
@@ -192,24 +212,6 @@ struct AppInfoView: View {
 
                 FeatureRow(info: Strings.Privacy.panic)
             }
-
-            // Warning
-            VStack(alignment: .leading, spacing: 6) {
-                SectionHeader(Strings.Warning.title)
-                    .foregroundColor(Color.red)
-                
-                Text(Strings.Warning.message)
-                    .font(.bitchatSystem(size: 14, design: .monospaced))
-                    .foregroundColor(Color.red)
-                    .fixedSize(horizontal: false, vertical: true)
-            }
-            .padding(.top, 6)
-            .padding(.bottom, 16)
-            .padding(.horizontal)
-            .background(Color.red.opacity(0.1))
-            .cornerRadius(8)
-            
-            .padding(.top)
         }
         .padding()
     }
@@ -223,19 +225,17 @@ struct AppInfoFeatureInfo {
 
 struct SectionHeader: View {
     let title: LocalizedStringKey
-    @Environment(\.colorScheme) var colorScheme
-    
-    private var textColor: Color {
-        colorScheme == .dark ? Color.green : Color(red: 0, green: 0.5, blue: 0)
-    }
-    
+    @ThemedPalette private var palette
+
+    private var textColor: Color { palette.primary }
+
     init(_ title: LocalizedStringKey) {
         self.title = title
     }
     
     var body: some View {
         Text(title)
-            .font(.bitchatSystem(size: 16, weight: .bold, design: .monospaced))
+            .bitchatFont(size: 16, weight: .bold)
             .foregroundColor(textColor)
             .padding(.top, 8)
     }
@@ -243,16 +243,12 @@ struct SectionHeader: View {
 
 struct FeatureRow: View {
     let info: AppInfoFeatureInfo
-    @Environment(\.colorScheme) var colorScheme
-    
-    private var textColor: Color {
-        colorScheme == .dark ? Color.green : Color(red: 0, green: 0.5, blue: 0)
-    }
-    
-    private var secondaryTextColor: Color {
-        colorScheme == .dark ? Color.green.opacity(0.8) : Color(red: 0, green: 0.5, blue: 0).opacity(0.8)
-    }
-    
+    @ThemedPalette private var palette
+
+    private var textColor: Color { palette.primary }
+
+    private var secondaryTextColor: Color { palette.secondary }
+
     var body: some View {
         HStack(alignment: .top, spacing: 12) {
             Image(systemName: info.icon)
@@ -262,11 +258,11 @@ struct FeatureRow: View {
             
             VStack(alignment: .leading, spacing: 4) {
                 Text(info.title)
-                    .font(.bitchatSystem(size: 14, weight: .semibold, design: .monospaced))
+                    .bitchatFont(size: 14, weight: .semibold)
                     .foregroundColor(textColor)
                 
                 Text(info.description)
-                    .font(.bitchatSystem(size: 12, design: .monospaced))
+                    .bitchatFont(size: 12)
                     .foregroundColor(secondaryTextColor)
                     .fixedSize(horizontal: false, vertical: true)
             }

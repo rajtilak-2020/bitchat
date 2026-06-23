@@ -8,6 +8,7 @@
 
 import Foundation
 import CryptoKit
+import BitFoundation
 @testable import bitchat
 
 final class TestHelpers {
@@ -30,7 +31,7 @@ final class TestHelpers {
     static func createTestMessage(
         content: String = TestConstants.testMessage1,
         sender: String = TestConstants.testNickname1,
-        senderPeerID: PeerID = TestConstants.testPeerID1,
+        senderPeerID: PeerID = PeerID(str: UUID().uuidString),
         isPrivate: Bool = false,
         recipientNickname: String? = nil,
         mentions: [String]? = nil
@@ -51,7 +52,7 @@ final class TestHelpers {
     
     static func createTestPacket(
         type: UInt8 = 0x01,
-        senderID: PeerID = TestConstants.testPeerID1,
+        senderID: PeerID = PeerID(str: UUID().uuidString),
         recipientID: PeerID? = nil,
         payload: Data = "test payload".data(using: .utf8)!,
         signature: Data? = nil,
@@ -90,8 +91,24 @@ final class TestHelpers {
             if Date().timeIntervalSince(start) > timeout {
                 throw TestError.timeout
             }
-            try await Task.sleep(nanoseconds: 10_000_000) // 10ms
+            try await sleep(0.01)
         }
+    }
+
+    @MainActor
+    static func waitUntil(
+        _ condition: @escaping () -> Bool,
+        timeout: TimeInterval = TestConstants.defaultTimeout,
+        pollInterval: TimeInterval = 0.01
+    ) async -> Bool {
+        let start = Date()
+        while !condition() {
+            if Date().timeIntervalSince(start) > timeout {
+                return condition()
+            }
+            try? await sleep(pollInterval)
+        }
+        return true
     }
     
     static func expectAsync<T>(
@@ -104,7 +121,7 @@ final class TestHelpers {
             }
             
             group.addTask {
-                try await Task.sleep(nanoseconds: UInt64(timeout * 1_000_000_000))
+                try await sleep(1)
                 throw TestError.timeout
             }
             
@@ -121,14 +138,46 @@ enum TestError: Error {
     case testFailure(String)
 }
 
-// MARK: - PeerID String Helpers
+// MARK: - Private chat seeding (ConversationStore migration)
 
-/// Raw String can be passed as PeerID
-extension PeerID: @retroactive ExpressibleByStringLiteral {
-    public init(stringLiteral value: String) {
-        self.init(str: value)
+extension ChatViewModel {
+    /// Test-only replacement for the deleted `privateChats` setter: seeds a
+    /// peer's chat through the single-writer `ConversationStore` intents
+    /// (upsert keeps re-seeding with updated copies working the way the old
+    /// dictionary assignment did).
+    @MainActor
+    func seedPrivateChat(_ messages: [BitchatMessage], for peerID: PeerID) {
+        _ = conversations.conversation(for: .directPeer(peerID))
+        for message in messages {
+            conversations.upsertByID(message, in: .directPeer(peerID))
+        }
+    }
+
+    /// Test-only replacement for the deleted `messages` setter: seeds a
+    /// public channel's conversation through the single-writer
+    /// `ConversationStore` intents (upsert keeps re-seeding with updated
+    /// copies working the way the old array assignment did).
+    @MainActor
+    func seedPublicMessages(_ messages: [BitchatMessage], for channel: ChannelID = .mesh) {
+        for message in messages {
+            conversations.upsertByID(message, in: ConversationID(channelID: channel))
+        }
+    }
+
+    /// Test-only replacement for `messages.removeAll()`: empties a public
+    /// channel's conversation.
+    @MainActor
+    func clearPublicMessages(for channel: ChannelID = .mesh) {
+        conversations.clear(ConversationID(channelID: channel))
+    }
+
+    /// Test-only: drops every private chat and unread flag.
+    @MainActor
+    func clearAllPrivateChats() {
+        conversations.removeAllDirectConversations()
     }
 }
 
-/// Interpolated String can be passed as PeerID
-extension PeerID: @retroactive ExpressibleByStringInterpolation {}
+func sleep(_ seconds: TimeInterval) async throws {
+    try await Task.sleep(nanoseconds: UInt64(seconds * 1_000_000_000))
+}

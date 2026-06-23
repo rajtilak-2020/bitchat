@@ -8,6 +8,7 @@
 
 import Foundation
 import CoreBluetooth
+@testable import BitFoundation // to avoid unnecessary public's
 @testable import bitchat
 
 /// In-memory BLE test harness used by E2E/Integration tests.
@@ -26,17 +27,14 @@ import CoreBluetooth
 ///   simulate broadcast propagation across the mesh. E2E tests keep it off and perform explicit
 ///   relays when needed.
 final class MockBLEService: NSObject {
-    // Enable automatic flooding for public messages in integration tests only
-    static var autoFloodEnabled: Bool = false
+    private let bus: MockBLEBus
     
     // MARK: - Properties matching BLEService
     
     weak var delegate: BitchatDelegate?
-    var myPeerID: PeerID = "MOCK1234"
+    var myPeerID = PeerID(str: "MOCK1234")
     var myNickname: String = "MockUser"
-    
-    private let mockKeychain = MockKeychain()
-    
+
     // Test-specific properties
     var sentMessages: [(message: BitchatMessage, packet: BitchatPacket)] = []
     var sentPackets: [BitchatPacket] = []
@@ -60,8 +58,8 @@ final class MockBLEService: NSObject {
     
     // MARK: - Initialization
     
-    override init() {
-        super.init()
+    init(bus: MockBLEBus) {
+        self.bus = bus
     }
     
     // MARK: - Methods matching BLEService
@@ -71,42 +69,15 @@ final class MockBLEService: NSObject {
     }
     
     // MARK: - In-memory test bus (for E2E/Integration)
-    /// Global per-process bus for deterministic routing in tests.
-    private static var registry: [PeerID: MockBLEService] = [:]
-    private static var adjacency: [PeerID: Set<PeerID>] = [:]
-
-    /// Clears global bus state. Call from test `setUp()`.
-    static func resetTestBus() {
-        registry.removeAll()
-        adjacency.removeAll()
-    }
 
     /// Registers this instance on first use.
     private func registerIfNeeded() {
-        MockBLEService.registry[myPeerID] = self
-        if MockBLEService.adjacency[myPeerID] == nil { MockBLEService.adjacency[myPeerID] = [] }
+        bus.register(self, for: myPeerID)
     }
 
     /// Returns adjacent neighbors based on the current simulated topology.
     private func neighbors() -> [MockBLEService] {
-        guard let ids = MockBLEService.adjacency[myPeerID] else { return [] }
-        return ids.compactMap { MockBLEService.registry[$0] }
-    }
-
-    /// Adds an undirected edge between two peerIDs.
-    private static func connectPeers(_ a: PeerID, _ b: PeerID) {
-        var setA = adjacency[a] ?? []
-        setA.insert(b)
-        adjacency[a] = setA
-        var setB = adjacency[b] ?? []
-        setB.insert(a)
-        adjacency[b] = setB
-    }
-
-    /// Removes an undirected edge between two peerIDs.
-    private static func disconnectPeers(_ a: PeerID, _ b: PeerID) {
-        if var setA = adjacency[a] { setA.remove(b); adjacency[a] = setA }
-        if var setB = adjacency[b] { setB.remove(a); adjacency[b] = setB }
+        bus.neighbors(of: myPeerID)
     }
 
     func startServices() {
@@ -135,6 +106,11 @@ final class MockBLEService: NSObject {
     
     func getPeers() -> [PeerID: String] {
         return getPeerNicknames()
+    }
+
+    /// Keep local echo synchronous so Swift Testing confirmations observe it deterministically.
+    private func deliverLocalEcho(_ message: BitchatMessage) {
+        delegate?.didReceiveMessage(message)
     }
     
     func sendMessage(_ content: String, mentions: [String] = [], to recipientID: String? = nil, messageID: String? = nil, timestamp: Date? = nil) {
@@ -165,15 +141,12 @@ final class MockBLEService: NSObject {
             sentMessages.append((message, packet))
             sentPackets.append(packet)
             
-            // Simulate local echo
-            DispatchQueue.main.async { [weak self] in
-                self?.delegate?.didReceiveMessage(message)
-            }
+            deliverLocalEcho(message)
             
             // Surface raw packet to tests that intercept/relay/encrypt
             packetDeliveryHandler?(packet)
 
-            // Deliver public messages to adjacent peers via test bus
+            // Deliver public messages to adjacent peers via bus
             if recipientID == nil {
                 for neighbor in neighbors() {
                     neighbor.simulateIncomingPacket(packet)
@@ -181,7 +154,15 @@ final class MockBLEService: NSObject {
             }
         }
     }
-    
+
+    func sendFileBroadcast(_ packet: BitchatFilePacket, transferId: String) {
+        // Tests currently ignore file transfer flows; keep stub for protocol conformance.
+    }
+
+    func sendFilePrivate(_ packet: BitchatFilePacket, to peerID: PeerID, transferId: String) {
+        // Tests currently ignore file transfer flows; keep stub for protocol conformance.
+    }
+
     func sendPrivateMessage(_ content: String, to recipientPeerID: PeerID, recipientNickname: String, messageID: String) {
         let message = BitchatMessage(
             id: messageID,
@@ -210,29 +191,19 @@ final class MockBLEService: NSObject {
             sentMessages.append((message, packet))
             sentPackets.append(packet)
             
-            // Simulate local echo
-            DispatchQueue.main.async { [weak self] in
-                self?.delegate?.didReceiveMessage(message)
-            }
+            deliverLocalEcho(message)
             
             // Surface raw packet to tests that intercept/relay/encrypt
             packetDeliveryHandler?(packet)
 
             // If directly connected to recipient, deliver only to them.
-            if let neighbors = MockBLEService.adjacency[myPeerID], neighbors.contains(recipientPeerID),
-               let target = MockBLEService.registry[recipientPeerID] {
+            if bus.isDirectNeighbor(myPeerID, recipientPeerID),
+               let target = bus.service(for: recipientPeerID) {
                 target.simulateIncomingPacket(packet)
             } else {
-                // Not directly connected: deliver to neighbors for relay; also deliver directly if target is known
-                if let target = MockBLEService.registry[recipientPeerID] {
-                    target.simulateIncomingPacket(packet)
-                }
-                if let neighbors = MockBLEService.adjacency[myPeerID] {
-                    for peer in neighbors where peer != recipientPeerID {
-                        if let neighbor = MockBLEService.registry[peer] {
-                            neighbor.simulateIncomingPacket(packet)
-                        }
-                    }
+                // Not directly connected: deliver to neighbors for relay
+                for neighbor in neighbors() where neighbor.peerID != recipientPeerID {
+                    neighbor.simulateIncomingPacket(packet)
                 }
             }
         }
@@ -267,10 +238,6 @@ final class MockBLEService: NSObject {
         delegate?.didUpdatePeerList([])
     }
     
-    func getNoiseService() -> NoiseEncryptionService {
-        return NoiseEncryptionService(keychain: mockKeychain)
-    }
-    
     func getFingerprint(for peerID: String) -> String? {
         return nil
     }
@@ -279,14 +246,14 @@ final class MockBLEService: NSObject {
     
     func simulateConnectedPeer(_ peerID: PeerID) {
         registerIfNeeded()
-        MockBLEService.connectPeers(myPeerID, peerID)
+        bus.connect(myPeerID, peerID)
         connectedPeers.insert(peerID)
         delegate?.didConnectToPeer(peerID)
         delegate?.didUpdatePeerList(Array(connectedPeers))
     }
     
     func simulateDisconnectedPeer(_ peerID: PeerID) {
-        MockBLEService.disconnectPeers(myPeerID, peerID)
+        bus.disconnect(myPeerID, peerID)
         connectedPeers.remove(peerID)
         delegate?.didDisconnectFromPeer(peerID)
         delegate?.didUpdatePeerList(Array(connectedPeers))
@@ -319,7 +286,7 @@ final class MockBLEService: NSObject {
                 // When enabled, propagate a public broadcast across the entire connected
                 // component regardless of the original TTL to better emulate large-network
                 // broadcast expectations. De-duplication via seenMessageIDs prevents loops.
-                if MockBLEService.autoFloodEnabled,
+                if bus.autoFloodEnabled,
                    packet.recipientID == nil,
                    !message.isPrivate {
                     let nextTTL = packet.ttl > 0 ? packet.ttl - 1 : 0
@@ -353,8 +320,8 @@ typealias MockSimplifiedBluetoothService = MockBLEService
 // MARK: - Helpers
 
 extension MockBLEService {
-    convenience init(peerID: PeerID, nickname: String) {
-        self.init()
+    convenience init(peerID: PeerID, nickname: String, bus: MockBLEBus) {
+        self.init(bus: bus)
         myPeerID = peerID
         mockNickname = nickname
     }

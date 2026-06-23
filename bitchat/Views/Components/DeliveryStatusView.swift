@@ -7,20 +7,17 @@
 //
 
 import SwiftUI
+import BitFoundation
 
 struct DeliveryStatusView: View {
-    @Environment(\.colorScheme) private var colorScheme
+    @ThemedPalette private var palette
     let status: DeliveryStatus
 
     // MARK: - Computed Properties
-    
-    private var textColor: Color {
-        colorScheme == .dark ? Color.green : Color(red: 0, green: 0.5, blue: 0)
-    }
-    
-    private var secondaryTextColor: Color {
-        colorScheme == .dark ? Color.green.opacity(0.8) : Color(red: 0, green: 0.5, blue: 0).opacity(0.8)
-    }
+
+    private var textColor: Color { palette.primary }
+
+    private var secondaryTextColor: Color { palette.secondary }
 
     private enum Strings {
         static func delivered(to nickname: String) -> String {
@@ -88,7 +85,7 @@ struct DeliveryStatusView: View {
                 Image(systemName: "checkmark")
                     .font(.bitchatSystem(size: 10, weight: .bold))
             }
-            .foregroundColor(Color(red: 0.0, green: 0.478, blue: 1.0))  // Bright blue
+            .foregroundColor(palette.accentBlue)
             .help(Strings.read(by: nickname))
             
         case .failed(let reason):
@@ -102,7 +99,7 @@ struct DeliveryStatusView: View {
                 Image(systemName: "checkmark")
                     .font(.bitchatSystem(size: 10))
                 Text(verbatim: "\(reached)/\(total)")
-                    .font(.bitchatSystem(size: 10, design: .monospaced))
+                    .bitchatFont(size: 10)
             }
             .foregroundColor(secondaryTextColor.opacity(0.6))
             .help(Strings.deliveredToMembers(reached, total))

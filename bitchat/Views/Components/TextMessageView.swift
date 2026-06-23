@@ -7,14 +7,29 @@
 //
 
 import SwiftUI
+import BitFoundation
 
 struct TextMessageView: View {
     @Environment(\.colorScheme) private var colorScheme: ColorScheme
-    @EnvironmentObject private var viewModel: ChatViewModel
-    
+    @Environment(\.appTheme) private var theme
+    @EnvironmentObject private var conversationUIModel: ConversationUIModel
+
     let message: BitchatMessage
-    @Binding var expandedMessageIDs: Set<String>
-    
+    /// Value snapshot of the message's mutable delivery status, captured at
+    /// construction. `BitchatMessage` is a reference type mutated in place by
+    /// `ConversationStore`, and SwiftUI compares reference-typed view fields
+    /// by identity — so a status-only change (e.g. delivered → read) on the
+    /// SAME instance would otherwise compare "unchanged" and this row's body
+    /// would be skipped even though the parent list re-rendered. Snapshotting
+    /// the enum makes the change visible to SwiftUI's structural diff.
+    private let deliveryStatus: DeliveryStatus?
+    @State private var expandedMessageIDs: Set<String> = []
+
+    init(message: BitchatMessage) {
+        self.message = message
+        self.deliveryStatus = message.deliveryStatus
+    }
+
     var body: some View {
         VStack(alignment: .leading, spacing: 0) {
             // Precompute heavy token scans once per row
@@ -23,14 +38,14 @@ struct TextMessageView: View {
             HStack(alignment: .top, spacing: 0) {
                 let isLong = (message.content.count > TransportConfig.uiLongMessageLengthThreshold || message.content.hasVeryLongToken(threshold: TransportConfig.uiVeryLongTokenThreshold)) && cashuLinks.isEmpty
                 let isExpanded = expandedMessageIDs.contains(message.id)
-                Text(viewModel.formatMessageAsText(message, colorScheme: colorScheme))
+                Text(conversationUIModel.formatMessage(message, colorScheme: colorScheme, theme: theme))
                     .fixedSize(horizontal: false, vertical: true)
                     .lineLimit(isLong && !isExpanded ? TransportConfig.uiLongMessageLineLimit : nil)
                     .frame(maxWidth: .infinity, alignment: .leading)
                 
                 // Delivery status indicator for private messages
-                if message.isPrivate && message.sender == viewModel.nickname,
-                   let status = message.deliveryStatus {
+                if message.isPrivate && conversationUIModel.isSentByCurrentUser(message),
+                   let status = deliveryStatus {
                     DeliveryStatusView(status: status)
                         .padding(.leading, 4)
                 }
@@ -44,7 +59,7 @@ struct TextMessageView: View {
                     if isExpanded { expandedMessageIDs.remove(message.id) }
                     else { expandedMessageIDs.insert(message.id) }
                 }
-                .font(.bitchatSystem(size: 11, weight: .medium, design: .monospaced))
+                .bitchatFont(size: 11, weight: .medium)
                 .foregroundColor(Color.blue)
                 .padding(.top, 4)
             }
@@ -66,14 +81,30 @@ struct TextMessageView: View {
     }
 }
 
-@available(macOS 14, iOS 17, *)
+// Wrapped in #if DEBUG because the preview depends on _PreviewHelpers
+// (PreviewKeychainManager, BitchatMessage.preview), a development asset
+// excluded from archive builds.
+#if DEBUG
 #Preview {
-    @Previewable @State var ids: Set<String> = []
     let keychain = PreviewKeychainManager()
+    let viewModel = ChatViewModel(
+        keychain: keychain,
+        idBridge: NostrIdentityBridge(),
+        identityManager: SecureIdentityStateManager(keychain)
+    )
+    let privateConversationModel = PrivateConversationModel(
+        chatViewModel: viewModel,
+        conversations: viewModel.conversations
+    )
+    let conversationUIModel = ConversationUIModel(
+        chatViewModel: viewModel,
+        privateConversationModel: privateConversationModel,
+        conversations: viewModel.conversations
+    )
     
     Group {
         List {
-            TextMessageView(message: .preview, expandedMessageIDs: $ids)
+            TextMessageView(message: .preview)
                 .listRowSeparator(.hidden)
                 .listRowInsets(EdgeInsets())
                 .listRowBackground(EmptyView())
@@ -81,17 +112,13 @@ struct TextMessageView: View {
         .environment(\.colorScheme, .light)
         
         List {
-            TextMessageView(message: .preview, expandedMessageIDs: $ids)
+            TextMessageView(message: .preview)
                 .listRowSeparator(.hidden)
                 .listRowInsets(EdgeInsets())
                 .listRowBackground(EmptyView())
         }
         .environment(\.colorScheme, .dark)
     }
-    .environmentObject(
-        ChatViewModel(
-            keychain: keychain,
-            identityManager: SecureIdentityStateManager(keychain)
-        )
-    )
+    .environmentObject(conversationUIModel)
 }
+#endif

@@ -7,6 +7,7 @@ on:
 
 permissions:
   contents: write
+  pull-requests: write
 
 jobs:
   update-relay-data:
@@ -17,10 +18,11 @@ jobs:
         uses: actions/checkout@v4
         with:
           token: ${{ secrets.GITHUB_TOKEN }}
-      
+          fetch-depth: 0
+
       - name: Fetch GeoRelays
         run: |
-          wget https://raw.githubusercontent.com/permissionlesstech/georelays/refs/heads/main/nostr_relays.csv
+          wget -q https://raw.githubusercontent.com/permissionlesstech/georelays/refs/heads/main/nostr_relays.csv
           mv nostr_relays.csv ./relays/online_relays_gps.csv
 
       - name: Check for changes

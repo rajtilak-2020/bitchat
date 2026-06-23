@@ -1,26 +1,32 @@
 import SwiftUI
 
 struct LocationNotesView: View {
-    @EnvironmentObject var viewModel: ChatViewModel
     @StateObject private var manager: LocationNotesManager
     let geohash: String
+    let senderNickname: String
     let onNotesCountChanged: ((Int) -> Void)?
 
-    @Environment(\.colorScheme) var colorScheme
+    @ThemedPalette private var palette
     @Environment(\.dynamicTypeSize) private var dynamicTypeSize
-    @ObservedObject private var locationManager = LocationChannelManager.shared
+    @EnvironmentObject private var locationChannelsModel: LocationChannelsModel
     @Environment(\.dismiss) private var dismiss
     @State private var draft: String = ""
 
-    init(geohash: String, onNotesCountChanged: ((Int) -> Void)? = nil) {
+    init(
+        geohash: String,
+        senderNickname: String,
+        onNotesCountChanged: ((Int) -> Void)? = nil,
+        manager: LocationNotesManager? = nil
+    ) {
         let gh = geohash.lowercased()
         self.geohash = gh
+        self.senderNickname = senderNickname
         self.onNotesCountChanged = onNotesCountChanged
-        _manager = StateObject(wrappedValue: LocationNotesManager(geohash: gh))
+        _manager = StateObject(wrappedValue: manager ?? LocationNotesManager(geohash: gh))
     }
 
-    private var backgroundColor: Color { colorScheme == .dark ? .black : .white }
-    private var accentGreen: Color { colorScheme == .dark ? .green : Color(red: 0, green: 0.5, blue: 0) }
+    private var backgroundColor: Color { palette.background }
+    private var accentGreen: Color { palette.accent }
     private var maxDraftLines: Int { dynamicTypeSize.isAccessibilitySize ? 5 : 3 }
 
     private enum Strings {
@@ -47,11 +53,11 @@ struct LocationNotesView: View {
                     notesContent
                 }
             }
-            .background(backgroundColor)
+            .themedSurface()
             inputSection
         }
         .frame(minWidth: 420, idealWidth: 440, minHeight: 620, idealHeight: 680)
-        .background(backgroundColor)
+        .themedSheetBackground()
         .onDisappear { manager.cancel() }
         .onChange(of: geohash) { newValue in
             manager.setGeohash(newValue)
@@ -70,7 +76,7 @@ struct LocationNotesView: View {
                 .frame(maxWidth: .infinity, maxHeight: .infinity)
                 inputSection
             }
-            .background(backgroundColor)
+            .themedSurface()
             #if os(iOS)
             .navigationBarTitleDisplayMode(.inline)
             .navigationBarHidden(true)
@@ -78,10 +84,7 @@ struct LocationNotesView: View {
             .navigationTitle("")
             #endif
         }
-       #if os(iOS)
-        .presentationDetents([.large])
-        #endif
-        .background(backgroundColor)
+        .themedSheetBackground()
         .onDisappear { manager.cancel() }
         .onChange(of: geohash) { newValue in
             manager.setGeohash(newValue)
@@ -96,7 +99,7 @@ struct LocationNotesView: View {
     private var closeButton: some View {
         Button(action: { dismiss() }) {
             Image(systemName: "xmark")
-                .font(.bitchatSystem(size: 13, weight: .semibold, design: .monospaced))
+                .bitchatFont(size: 13, weight: .semibold)
                 .frame(width: 32, height: 32)
         }
         .buttonStyle(.plain)
@@ -108,40 +111,40 @@ struct LocationNotesView: View {
         return VStack(alignment: .leading, spacing: 8) {
             HStack(spacing: 12) {
                 Text(headerTitle(for: count))
-                    .font(.bitchatSystem(size: 18, design: .monospaced))
+                    .bitchatFont(size: 18)
                 Spacer()
                 closeButton
             }
-            if let building = locationManager.locationNames[.building], !building.isEmpty {
+            if let building = locationChannelsModel.locationName(for: .building), !building.isEmpty {
                 Text(building)
-                    .font(.bitchatSystem(size: 12, design: .monospaced))
+                    .bitchatFont(size: 12)
                     .foregroundColor(accentGreen)
-            } else if let block = locationManager.locationNames[.block], !block.isEmpty {
+            } else if let block = locationChannelsModel.locationName(for: .block), !block.isEmpty {
                 Text(block)
-                    .font(.bitchatSystem(size: 12, design: .monospaced))
+                    .bitchatFont(size: 12)
                     .foregroundColor(accentGreen)
             }
             Text(Strings.description)
-                .font(.bitchatSystem(size: 12, design: .monospaced))
+                .bitchatFont(size: 12)
                 .foregroundColor(.secondary)
                 .fixedSize(horizontal: false, vertical: true)
             if manager.state == .noRelays {
                 Text(Strings.relaysPaused)
-                    .font(.bitchatSystem(size: 11, design: .monospaced))
+                    .bitchatFont(size: 11)
                     .foregroundColor(.secondary)
             }
         }
         .padding(.horizontal, 16)
         .padding(.top, 16)
         .padding(.bottom, 12)
-        .background(backgroundColor)
+        .themedSurface()
     }
 
     private func headerTitle(for count: Int) -> String {
         String(
             format: String(localized: "location_notes.header", comment: "Header displaying the geohash and localized note count"),
             locale: .current,
-            geohash, count
+            "\(geohash) ± 1", count
         )
     }
 
@@ -173,16 +176,16 @@ struct LocationNotesView: View {
         return VStack(alignment: .leading, spacing: 2) {
             HStack(spacing: 6) {
                 Text(verbatim: "@\(baseName)")
-                    .font(.bitchatSystem(size: 12, weight: .semibold, design: .monospaced))
+                    .bitchatFont(size: 12, weight: .semibold)
                 if !ts.isEmpty {
                     Text(ts)
-                        .font(.bitchatSystem(size: 11, design: .monospaced))
+                        .bitchatFont(size: 11)
                         .foregroundColor(.secondary)
                 }
                 Spacer()
             }
             Text(note.content)
-                .font(.bitchatSystem(size: 14, design: .monospaced))
+                .bitchatFont(size: 14)
                 .fixedSize(horizontal: false, vertical: true)
         }
         .padding(.vertical, 4)
@@ -191,12 +194,12 @@ struct LocationNotesView: View {
     private var noRelaysRow: some View {
         VStack(alignment: .leading, spacing: 4) {
             Text(Strings.noRelaysNearby)
-                .font(.bitchatSystem(size: 13, weight: .semibold, design: .monospaced))
+                .bitchatFont(size: 13, weight: .semibold)
             Text(Strings.relaysRetryHint)
-                .font(.bitchatSystem(size: 12, design: .monospaced))
+                .bitchatFont(size: 12)
                 .foregroundColor(.secondary)
             Button(Strings.retry) { manager.refresh() }
-                .font(.bitchatSystem(size: 12, design: .monospaced))
+                .bitchatFont(size: 12)
                 .buttonStyle(.plain)
         }
         .padding(.vertical, 6)
@@ -206,7 +209,7 @@ struct LocationNotesView: View {
         HStack(spacing: 10) {
             ProgressView()
             Text(Strings.loadingNotes)
-                .font(.bitchatSystem(size: 12, design: .monospaced))
+                .bitchatFont(size: 12)
                 .foregroundColor(.secondary)
             Spacer()
         }
@@ -216,9 +219,9 @@ struct LocationNotesView: View {
     private var emptyRow: some View {
         VStack(alignment: .leading, spacing: 4) {
             Text(Strings.emptyTitle)
-                .font(.bitchatSystem(size: 13, weight: .semibold, design: .monospaced))
+                .bitchatFont(size: 13, weight: .semibold)
             Text(Strings.emptySubtitle)
-                .font(.bitchatSystem(size: 12, design: .monospaced))
+                .bitchatFont(size: 12)
                 .foregroundColor(.secondary)
         }
         .padding(.vertical, 6)
@@ -228,13 +231,13 @@ struct LocationNotesView: View {
         VStack(alignment: .leading, spacing: 4) {
             HStack(spacing: 6) {
                 Image(systemName: "exclamationmark.triangle.fill")
-                    .font(.bitchatSystem(size: 12, design: .monospaced))
+                    .bitchatFont(size: 12)
                 Text(message)
-                    .font(.bitchatSystem(size: 12, design: .monospaced))
+                    .bitchatFont(size: 12)
                 Spacer()
             }
             Button(Strings.dismissError) { manager.clearError() }
-                .font(.bitchatSystem(size: 12, design: .monospaced))
+                .bitchatFont(size: 12)
                 .buttonStyle(.plain)
         }
         .padding(.vertical, 6)
@@ -244,7 +247,7 @@ struct LocationNotesView: View {
         HStack(alignment: .top, spacing: 10) {
             TextField(Strings.addPlaceholder, text: $draft, axis: .vertical)
                 .textFieldStyle(.plain)
-                .font(.bitchatSystem(size: 14, design: .monospaced))
+                .bitchatFont(size: 14)
                 .lineLimit(maxDraftLines, reservesSpace: true)
                 .padding(.vertical, 6)
             Button(action: send) {
@@ -258,19 +261,18 @@ struct LocationNotesView: View {
         }
         .padding(.horizontal, 16)
         .padding(.vertical, 14)
-        .background(backgroundColor)
+        .themedSurface()
         .overlay(Divider(), alignment: .top)
     }
 
     private func send() {
-        let content = draft.trimmingCharacters(in: .whitespacesAndNewlines)
-        guard !content.isEmpty else { return }
-        manager.send(content: content, nickname: viewModel.nickname)
+        guard let content = draft.trimmedOrNilIfEmpty else { return }
+        manager.send(content: content, nickname: senderNickname)
         draft = ""
     }
 
     private var sendButtonEnabled: Bool {
-        !draft.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty && manager.state != .noRelays
+        !draft.trimmed.isEmpty && manager.state != .noRelays
     }
 
     // MARK: - Timestamp Formatting

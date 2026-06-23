@@ -1,6 +1,6 @@
 # bitchat Privacy Policy
 
-*Last updated: January 2025*
+*Last updated: June 2026*
 
 ## Our Commitment
 
@@ -9,7 +9,7 @@ bitchat is designed with privacy as its foundation. We believe private communica
 ## Summary
 
 - **No personal data collection** - We don't collect names, emails, or phone numbers
-- **No servers** - Everything happens on your device and through peer-to-peer connections
+- **No accounts or company servers** - Mesh chat works peer-to-peer; optional Nostr features use public or user-selected relays
 - **No tracking** - We have no analytics, telemetry, or user tracking
 - **Open source** - You can verify these claims by reading our code
 
@@ -17,11 +17,11 @@ bitchat is designed with privacy as its foundation. We believe private communica
 
 ### On Your Device Only
 
-1. **Identity Key** 
-   - A cryptographic key generated on first launch
+1. **Identity Keys**
+   - Cryptographic private keys generated on first launch or when optional Nostr identities are created
    - Stored locally in your device's secure storage
    - Allows you to maintain "favorite" relationships across app restarts
-   - Never leaves your device
+   - Private keys never leave your device; public keys are shared when needed for messaging
 
 2. **Nickname**
    - The display name you choose (or auto-generated)
@@ -38,12 +38,19 @@ bitchat is designed with privacy as its foundation. We believe private communica
    - Stored only on your device
    - Allows you to recognize these peers in future sessions
 
+5. **Optional Location Channel State**
+   - Your selected geohash channel, bookmarked geohashes, teleport flags, and bookmark display names
+   - Stored locally on your device so the location-channel UI can restore your choices
+   - Per-geohash Nostr identities are derived locally from a device seed stored in secure storage
+   - Exact latitude and longitude are not persisted by bitchat
+
 ### Temporary Session Data
 
 During each session, bitchat temporarily maintains:
 - Active peer connections (forgotten when app closes)
 - Routing information for message delivery
 - Cached messages for offline peers (12 hours max)
+- Your current location while optional location channels are enabled, used locally to compute geohash channels and friendly place names
 
 ## What Information is Shared
 
@@ -62,13 +69,21 @@ When you join a password-protected room:
 - Your nickname appears in the member list
 - Room owners can see you've joined
 
+### With Nostr Relays (Optional Features)
+
+If you enable Nostr-backed features:
+- Private fallback messages to mutual favorites are sent as encrypted NIP-17 gift wraps. Relays can see event metadata, but not message content.
+- Public location-channel messages, location notes, and presence are scoped with geohash tags. Relays and other participants can see the geohash tag, event kind, timestamp, and public key used for that geohash.
+- Exact GPS coordinates are not included in Nostr events by bitchat. The geohash precision you choose can still reveal an approximate area, from region-level to building-level.
+- Automatic presence heartbeats are limited to low-precision geohashes (region, province, and city). More precise geohash posts happen only when you use those channels or location notes.
+
 ## What We DON'T Do
 
 bitchat **never**:
 - Collects personal information
-- Tracks your location
-- Stores data on servers
-- Shares data with third parties
+- Sells or shares your exact GPS location
+- Stores data on servers we operate
+- Sells your data to advertisers or data brokers
 - Uses analytics or telemetry
 - Creates user profiles
 - Requires registration
@@ -84,17 +99,25 @@ All private messages use end-to-end encryption:
 ## Your Rights
 
 You have complete control:
-- **Delete Everything**: Triple-tap the logo to instantly wipe all data
-- **Leave Anytime**: Close the app and your presence disappears
-- **No Account**: Nothing to delete from servers because there are none
-- **Portability**: Your data never leaves your device unless you export it
+- **Delete Local State**: Triple-tap the logo to instantly wipe local keys, sessions, caches, and preferences
+- **Leave Anytime**: Close the app and local presence stops; relay-backed presence ages out
+- **No Account**: No account record exists for you to delete from us
+- **Portability**: Your local state stays on your device unless you send messages, use optional relay-backed features, or export it
 
 ## Bluetooth & Permissions
 
 bitchat requires Bluetooth permission to function:
 - Used only for peer-to-peer communication
-- No location data is accessed or stored
 - Bluetooth is not used for tracking
+- You can revoke this permission at any time in system settings
+
+## Location Permission
+
+Location permission is optional and is used only for location channels:
+- Used to compute local geohash channels and display names
+- Requested as when-in-use permission
+- Exact coordinates are not shared in messages or stored by bitchat
+- Selected and bookmarked geohashes may persist locally until you remove them, use panic wipe, or delete the app
 - You can revoke this permission at any time in system settings
 
 ## Children's Privacy
@@ -106,12 +129,15 @@ bitchat does not knowingly collect information from children. The app has no age
 - **Messages**: Deleted from memory when app closes (unless room retention is enabled)
 - **Identity Key**: Persists until you delete the app
 - **Favorites**: Persist until you remove them or delete the app
+- **Location channel choices**: Selected/bookmarked geohashes persist locally until removed, panic-wiped, or the app is deleted
+- **Nostr relay data**: Public geohash events and encrypted gift wraps may be retained by relays according to each relay's policy
 - **Everything Else**: Exists only during active sessions
 
 ## Security Measures
 
 - All communication is encrypted
-- No data transmitted to servers (there are none)
+- No accounts or company servers
+- Optional Nostr relays receive only the events needed for Nostr-backed private fallback or public location channels
 - Open source code for public audit
 - Regular security updates
 - Cryptographic signatures prevent tampering
@@ -121,7 +147,7 @@ bitchat does not knowingly collect information from children. The app has no age
 If we update this policy:
 - The "Last updated" date will change
 - The updated policy will be included in the app
-- No retroactive changes can affect data (since we don't collect any)
+- No retroactive changes can make us collect data already held only in your app
 
 ## Contact
 
@@ -132,7 +158,7 @@ bitchat is an open source project. For privacy questions:
 
 ## Philosophy
 
-Privacy isn't just a feature—it's the entire point. bitchat proves that modern communication doesn't require surrendering your privacy. No accounts, no servers, no surveillance. Just people talking freely.
+Privacy isn't just a feature—it's the entire point. bitchat proves that modern communication doesn't require surrendering your privacy. No accounts, no company servers, no analytics. Just people talking freely.
 
 ---
 
